@@ -11,8 +11,7 @@ public class Table {
         return rows.get(key);
     }
 
-    public void removeRow(String key){
+    public void deleteRow(String key){
         rows.remove(key);
-        return;
     }
 }
