@@ -21,7 +21,7 @@ public class DatabaseService {
     public void put(String table, String key, Map<String,Object> data){
         validate(table, key, null);
         String lockKey = table + ":" + key;
-        ReentrantLock lock = lockManager.getLock(lockKey);
+        var lock = lockManager.getLock(lockKey).writeLock();
         lock.lock();
         try {
             if(database.getTable(table).getRow(key)!=null){
@@ -38,18 +38,25 @@ public class DatabaseService {
 
     public Row get(String table, String key){
         validate(table, key, null);
-
-        Row row = database.getTable(table).getRow(key);
-        if(row == null){
-            throw new RuntimeException("Row not found");
+        String lockKey = table + ":" + key;
+        var lock = lockManager.getLock(lockKey).readLock();
+        lock.lock();
+        try {
+            Row row = database.getTable(table).getRow(key);
+            if(row == null){
+                throw new RuntimeException("Row not found");
+            }
+            return row;
+        }finally {
+            lock.unlock();
         }
-        return row;
+
     }
 
     public void delete(String table, String key) {
         validate(table, key, null);
         String lockKey = table + ":" + key;
-        ReentrantLock lock = lockManager.getLock(lockKey);
+        var lock = lockManager.getLock(lockKey).writeLock();
         lock.lock();
         try{
             Row row = database.getTable(table).getRow(key);
