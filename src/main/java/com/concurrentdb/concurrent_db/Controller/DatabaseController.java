@@ -2,6 +2,7 @@ package com.concurrentdb.concurrent_db.Controller;
 
 import com.concurrentdb.concurrent_db.Model.Row;
 import com.concurrentdb.concurrent_db.Service.DatabaseService;
+import com.concurrentdb.concurrent_db.Transactions.TransactionManager;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
@@ -13,6 +14,9 @@ public class DatabaseController {
 
     @Autowired
     private DatabaseService databaseService;
+
+    @Autowired
+    private TransactionManager transactionManager
 
     @PostMapping("/{table}/{key}")
     public void insert(@PathVariable String table,
@@ -53,6 +57,20 @@ public class DatabaseController {
             throw new RuntimeException("Key cannot be empty");
         }
         databaseService.delete(table, key);
+    }
+
+    @PostMapping("/tx/begin")
+    public void beginTransaction(){
+        transactionManager.begin();
+    }
+    @PostMapping("/tx/commit")
+    public void commitTransaction() {
+        databaseService.commit();
+    }
+
+    @PostMapping("/tx/rollback")
+    public void rollbackTransaction() {
+        databaseService.rollback();
     }
 
 }
