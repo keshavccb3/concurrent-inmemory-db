@@ -38,26 +38,28 @@ public class DatabaseController {
     }
     @GetMapping("/{table}/{key}")
     public Row get(@PathVariable String table,
-                   @PathVariable String key){
+                   @PathVariable String key,
+                   @RequestParam(required = false) String txId){
         if (table == null || table.isEmpty()) {
             throw new RuntimeException("Table name cannot be empty");
         }
         if (key == null || key.isEmpty()) {
             throw new RuntimeException("Key cannot be empty");
         }
-        return databaseService.get(table,key);
+        return databaseService.get(table,key,txId);
     }
 
     @DeleteMapping("/{table}/{key}")
     public void delete(@PathVariable String table,
-                       @PathVariable String key) {
+                       @PathVariable String key,
+                       @RequestParam(required = false) String txId) {
         if (table == null || table.isEmpty()) {
             throw new RuntimeException("Table name cannot be empty");
         }
         if (key == null || key.isEmpty()) {
             throw new RuntimeException("Key cannot be empty");
         }
-        databaseService.delete(table, key);
+        databaseService.delete(table, key, txId);
     }
 
     @PostMapping("/tx/begin")

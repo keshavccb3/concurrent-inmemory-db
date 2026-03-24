@@ -26,13 +26,14 @@ public class DatabaseService {
         validate(table, key, null);
         String lockKey = table + ":" + key;
         var lock = lockManager.getLock(lockKey).writeLock();
+        TransactionContext tx = (txId != null) ? transactionManager.getContext(txId) : null;
+        if(tx!=null){
+            tx.put(lockKey, new Row(key,data));
+            return;
+        }
+        // Normal flow
         lock.lock();
         try {
-            TransactionContext tx = (txId != null) ? transactionManager.getContext(txId) : null;
-            if(tx!=null){
-                tx.put(lockKey, new Row(key,data));
-                return;
-            }
             if(database.getTable(table).getRow(key)!=null){
                 throw new RuntimeException("key already exists");
             }
@@ -42,12 +43,15 @@ public class DatabaseService {
             lock.unlock();
         }
 
-
     }
 
-    public Row get(String table, String key){
+    public Row get(String table, String key, String txId){
         validate(table, key, null);
         String lockKey = table + ":" + key;
+        TransactionContext tx = (txId != null) ? transactionManager.getContext(txId) : null;
+        if (tx != null && tx.getChanges().containsKey(lockKey)) {
+            return (Row) tx.getChanges().get(lockKey);
+        }
         var lock = lockManager.getLock(lockKey).readLock();
         lock.lock();
         try {
@@ -62,12 +66,23 @@ public class DatabaseService {
 
     }
 
-    public void delete(String table, String key) {
+    public void delete(String table, String key, String txId){
+
         validate(table, key, null);
+
         String lockKey = table + ":" + key;
+
+        TransactionContext tx = (txId != null) ? transactionManager.getContext(txId) : null;
+
+        if (tx != null) {
+            tx.put(lockKey, null);
+            return;
+        }
+
         var lock = lockManager.getLock(lockKey).writeLock();
+
         lock.lock();
-        try{
+        try {
             Row row = database.getTable(table).getRow(key);
 
             if (row == null) {
@@ -75,10 +90,9 @@ public class DatabaseService {
             }
 
             database.getTable(table).deleteRow(key);
-        }finally {
+        } finally {
             lock.unlock();
         }
-
     }
 
     private void validate(String table, String key, Map<String, Object> data) {
@@ -97,6 +111,7 @@ public class DatabaseService {
     }
 
     public void commit(String txId){
+
         TransactionContext tx = transactionManager.getContext(txId);
 
         if(tx == null){
@@ -104,11 +119,26 @@ public class DatabaseService {
         }
 
         for(var entry : tx.getChanges().entrySet()){
+
             String lockKey = entry.getKey();
-            Row row = (Row) entry.getValue();
+            Object value = entry.getValue();
 
             String[] parts = lockKey.split(":");
-            database.getTable(parts[0]).putRow(parts[1], row);
+            String table = parts[0];
+            String key = parts[1];
+
+            var lock = lockManager.getLock(lockKey).writeLock();
+
+            lock.lock();
+            try {
+                if (value == null) {
+                    database.getTable(table).deleteRow(key);
+                } else {
+                    database.getTable(table).putRow(key, (Row) value);
+                }
+            } finally {
+                lock.unlock();
+            }
         }
 
         transactionManager.remove(txId);
@@ -120,7 +150,6 @@ public class DatabaseService {
         if (tx == null) {
             throw new RuntimeException("No active transaction");
         }
-
         transactionManager.remove(txId);
     }
 
