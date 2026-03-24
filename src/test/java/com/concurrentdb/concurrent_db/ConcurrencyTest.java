@@ -29,7 +29,7 @@ public class ConcurrencyTest {
                     Map<String, Object> data = new HashMap<>();
                     data.put("name", "User");
 
-                    service.put("users", "101", data);
+                    service.put("users", "101", data, null);
 
                     System.out.println(Thread.currentThread().getName() + " SUCCESS");
 

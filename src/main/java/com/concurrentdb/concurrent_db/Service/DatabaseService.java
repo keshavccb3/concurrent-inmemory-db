@@ -22,13 +22,13 @@ public class DatabaseService {
         this.lockManager = lockManager;
         this.transactionManager = transactionManager;
     }
-    public void put(String table, String key, Map<String,Object> data){
+    public void put(String table, String key, Map<String,Object> data, String txId){
         validate(table, key, null);
         String lockKey = table + ":" + key;
         var lock = lockManager.getLock(lockKey).writeLock();
         lock.lock();
         try {
-            TransactionContext tx = transactionManager.getContext();
+            TransactionContext tx = (txId != null) ? transactionManager.getContext(txId) : null;
             if(tx!=null){
                 tx.put(lockKey, new Row(key,data));
                 return;
@@ -96,25 +96,32 @@ public class DatabaseService {
         }
     }
 
-    public void commit(){
-        TransactionContext tx = transactionManager.getContext();
-        if(tx==null){
+    public void commit(String txId){
+        TransactionContext tx = transactionManager.getContext(txId);
+
+        if(tx == null){
             throw new RuntimeException("No active transaction");
         }
 
         for(var entry : tx.getChanges().entrySet()){
             String lockKey = entry.getKey();
             Row row = (Row) entry.getValue();
+
             String[] parts = lockKey.split(":");
-            String table = parts[0];
-            String key = parts[1];
-            database.getTable(table).putRow(key,row);
+            database.getTable(parts[0]).putRow(parts[1], row);
         }
-        transactionManager.clear();
+
+        transactionManager.remove(txId);
     }
 
-    public void rollback(){
-        transactionManager.clear();
+    public void rollback(String txId) {
+        TransactionContext tx = transactionManager.getContext(txId);
+
+        if (tx == null) {
+            throw new RuntimeException("No active transaction");
+        }
+
+        transactionManager.remove(txId);
     }
 
 

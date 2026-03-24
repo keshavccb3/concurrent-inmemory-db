@@ -16,12 +16,13 @@ public class DatabaseController {
     private DatabaseService databaseService;
 
     @Autowired
-    private TransactionManager transactionManager
+    private TransactionManager transactionManager;
 
     @PostMapping("/{table}/{key}")
     public void insert(@PathVariable String table,
                        @PathVariable String key,
-                       @RequestBody Map<String, Object> data){
+                       @RequestBody Map<String, Object> data,
+                       @RequestParam(required = false) String txId){
         if (table == null || table.isEmpty()) {
             throw new RuntimeException("Table name cannot be empty");
         }
@@ -33,7 +34,7 @@ public class DatabaseController {
         if(data == null || data.isEmpty()){
             throw new RuntimeException("Request body cannot be empty");
         }
-        databaseService.put(table,key,data);
+        databaseService.put(table,key,data, txId);
     }
     @GetMapping("/{table}/{key}")
     public Row get(@PathVariable String table,
@@ -60,17 +61,23 @@ public class DatabaseController {
     }
 
     @PostMapping("/tx/begin")
-    public void beginTransaction(){
-        transactionManager.begin();
+    public String beginTransaction(){
+        return transactionManager.begin();
     }
     @PostMapping("/tx/commit")
-    public void commitTransaction() {
-        databaseService.commit();
+    public void commitTransaction(@RequestParam String txId) {
+        if (txId == null || txId.isEmpty()) {
+            throw new RuntimeException("txId is required");
+        }
+        databaseService.commit(txId);
     }
 
     @PostMapping("/tx/rollback")
-    public void rollbackTransaction() {
-        databaseService.rollback();
+    public void rollbackTransaction(@RequestParam String txId) {
+        if (txId == null || txId.isEmpty()) {
+            throw new RuntimeException("txId is required");
+        }
+        databaseService.rollback(txId);
     }
 
 }
