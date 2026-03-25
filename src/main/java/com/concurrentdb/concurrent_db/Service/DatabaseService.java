@@ -28,6 +28,11 @@ public class DatabaseService {
         var lock = lockManager.getLock(lockKey).writeLock();
         TransactionContext tx = (txId != null) ? transactionManager.getContext(txId) : null;
         if(tx!=null){
+            Row existing = database.getTable(table).getRow(key);
+
+            int version = (existing == null) ? 0 : existing.getVersion();
+
+            tx.setOriginalVersion(lockKey, version);
             tx.put(lockKey, new Row(key,data));
             return;
         }
@@ -75,6 +80,11 @@ public class DatabaseService {
         TransactionContext tx = (txId != null) ? transactionManager.getContext(txId) : null;
 
         if (tx != null) {
+            Row existing = database.getTable(table).getRow(key);
+            if (existing == null) {
+                throw new RuntimeException("Row not found");
+            }
+            tx.setOriginalVersion(lockKey, existing.getVersion());
             tx.put(lockKey, null);
             return;
         }
@@ -131,10 +141,25 @@ public class DatabaseService {
 
             lock.lock();
             try {
+                Row current = database.getTable(table).getRow(key);
+
+                int currentVersion = (current == null) ? 0 : current.getVersion();
+                Integer originalVersion = tx.getOriginalVersion(lockKey);
+
+                if (originalVersion == null) {
+                    throw new RuntimeException("Missing version info");
+                }
+
+                if (currentVersion != originalVersion) {
+                    throw new RuntimeException("Conflict detected! Retry transaction.");
+                }
+
                 if (value == null) {
                     database.getTable(table).deleteRow(key);
                 } else {
-                    database.getTable(table).putRow(key, (Row) value);
+                    Row newRow = (Row) value;
+                    newRow.setVersion(currentVersion + 1);
+                    database.getTable(table).putRow(key, newRow);
                 }
             } finally {
                 lock.unlock();
