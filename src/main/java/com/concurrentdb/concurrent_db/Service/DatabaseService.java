@@ -1,6 +1,7 @@
 package com.concurrentdb.concurrent_db.Service;
 
 import com.concurrentdb.concurrent_db.Model.Row;
+import com.concurrentdb.concurrent_db.Persistence.PersistenceService;
 import com.concurrentdb.concurrent_db.Storage.InMemoryDatabase;
 import com.concurrentdb.concurrent_db.Transactions.TransactionContext;
 import com.concurrentdb.concurrent_db.Transactions.TransactionManager;
@@ -16,11 +17,13 @@ public class DatabaseService {
     private final InMemoryDatabase database;
     private final LockManager lockManager;
     private final TransactionManager transactionManager;
+    private final PersistenceService persistenceService;
 
-    public DatabaseService(InMemoryDatabase database, LockManager lockManager, TransactionManager transactionManager) {
+    public DatabaseService(InMemoryDatabase database, LockManager lockManager, TransactionManager transactionManager, PersistenceService persistenceService) {
         this.database = database;
         this.lockManager = lockManager;
         this.transactionManager = transactionManager;
+        this.persistenceService = persistenceService;
     }
     public void put(String table, String key, Map<String,Object> data, String txId){
         validate(table, key, null);
@@ -167,6 +170,7 @@ public class DatabaseService {
         }
 
         transactionManager.remove(txId);
+        persistenceService.save(database);
     }
 
     public void rollback(String txId) {
