@@ -2,51 +2,73 @@ package com.concurrentdb.concurrent_db;
 
 
 import com.concurrentdb.concurrent_db.Service.DatabaseService;
+import com.concurrentdb.concurrent_db.Transactions.TransactionManager;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 @SpringBootTest
 public class ConcurrencyTest {
 
     @Autowired
-    private DatabaseService service;
+    private DatabaseService databaseService;
+
+    @Autowired
+    private TransactionManager transactionManager;
 
     @Test
-    void testConcurrentInsert() throws InterruptedException {
+    public void stressTestConcurrentTransactions() throws InterruptedException {
 
-        int threadCount = 10;
+        int threads = 10;
+        int tasks = 50;
 
-        Thread[] threads = new Thread[threadCount];
+        ExecutorService executor = Executors.newFixedThreadPool(threads);
 
-        for (int i = 0; i < threadCount; i++) {
+        for (int i = 0; i < tasks; i++) {
+            int id = i;
 
-            threads[i] = new Thread(() -> {
+            executor.submit(() -> {
+                String txId = null;
+
                 try {
+                    // 🔥 BEGIN → auto generate txId
+                    txId = transactionManager.begin();
+
+                    // 🔥 DATA
                     Map<String, Object> data = new HashMap<>();
-                    data.put("name", "User");
+                    data.put("name", "User" + id);
+                    data.put("age", 20 + id);
 
-                    service.put("users", "101", data, null);
+                    // 🔥 INSERT
+                    databaseService.put("users", String.valueOf(id), data, txId);
 
-                    System.out.println(Thread.currentThread().getName() + " SUCCESS");
+                    // 🔥 COMMIT
+                    databaseService.commit(txId);
+
+                    System.out.println("✅ SUCCESS: " + txId);
 
                 } catch (Exception e) {
-                    System.out.println(Thread.currentThread().getName() + " FAILED: " + e.getMessage());
+                    System.out.println("❌ FAIL: " + txId + " → " + e.getMessage());
+
+                    // rollback if needed
+                    if (txId != null) {
+                        try {
+                            databaseService.rollback(txId);
+                        } catch (Exception ignored) {}
+                    }
                 }
             });
         }
 
-        // start all threads
-        for (Thread t : threads) {
-            t.start();
-        }
+        executor.shutdown();
+        executor.awaitTermination(60, TimeUnit.SECONDS);
 
-        // wait for all to finish
-        for (Thread t : threads) {
-            t.join();
-        }
+        System.out.println("🔥 STRESS TEST COMPLETED");
     }
 }

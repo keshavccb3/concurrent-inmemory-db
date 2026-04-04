@@ -13,18 +13,29 @@ public class TransactionContext {
 
 
     public void put(String key, Object data){
-        changes.put(key,data);
+
+        if (key == null || key.isEmpty()) {
+            throw new RuntimeException("Transaction key is null or empty ");
+        }
+
+        changes.put(key, data);
     }
 
     public Map<String,Object> getChanges(){
         return changes;
     }
-    public void setOriginalVersion(String key, int version) {
+
+    public void setOriginalVersion(String key, int version){
+
+        if (key == null) {
+            throw new RuntimeException("Version key is null");
+        }
+
         originalVersions.put(key, version);
     }
 
-    public Integer getOriginalVersion(String key) {
-        return originalVersions.get(key);
+    public int getOriginalVersion(String key){
+        return originalVersions.getOrDefault(key, 0);
     }
 
 

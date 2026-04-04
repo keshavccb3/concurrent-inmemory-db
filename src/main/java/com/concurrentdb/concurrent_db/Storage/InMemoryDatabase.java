@@ -7,6 +7,7 @@ import lombok.Data;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 @Component
@@ -14,10 +15,13 @@ import java.util.concurrent.ConcurrentHashMap;
 public class InMemoryDatabase {
     @Autowired
     private PersistenceService persistenceService;
-    private ConcurrentHashMap<String, Table> tables = new ConcurrentHashMap<>();
+    private Map<String, Table> tables = new ConcurrentHashMap<>();
     public InMemoryDatabase() {}
     public Table getTable(String name){
         return tables.computeIfAbsent(name,k->new Table());
+    }
+    public void clear() {
+        tables.clear();
     }
 
     @PostConstruct
@@ -27,5 +31,6 @@ public class InMemoryDatabase {
             this.tables = loaded.getTables();
         }
     }
+
 
 }

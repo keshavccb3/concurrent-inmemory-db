@@ -9,6 +9,7 @@ import com.concurrentdb.concurrent_db.lock.LockManager;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.locks.ReentrantLock;
 
@@ -79,7 +80,6 @@ public class DatabaseService {
         validate(table, key, null);
 
         String lockKey = table + ":" + key;
-
         TransactionContext tx = (txId != null) ? transactionManager.getContext(txId) : null;
 
         if (tx != null) {
@@ -103,6 +103,47 @@ public class DatabaseService {
             }
 
             database.getTable(table).deleteRow(key);
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    public void update(String table, String key, Map<String, Object> data, String txId) {
+
+        validate(table, key, data);
+        String lockKey = table + ":" + key;
+        var lock = lockManager.getLock(lockKey).writeLock();
+
+        lock.lock();
+        try {
+
+            Row existing = database.getTable(table).getRow(key);
+
+            if (existing == null) {
+                throw new RuntimeException("Row does not exist");
+            }
+
+            Map<String, Object> updatedData = new HashMap<>(existing.getData());
+
+            for (var entry : data.entrySet()) {
+                if (entry.getValue() != null) {
+                    updatedData.put(entry.getKey(), entry.getValue());
+                }
+            }
+
+            Row newRow = new Row(key, updatedData);
+
+            TransactionContext tx = transactionManager.getContext(txId);
+
+            if (tx != null) {
+                tx.put(lockKey, newRow);
+                tx.setOriginalVersion(lockKey, existing.getVersion());
+                return;
+            }
+
+            newRow.setVersion(existing.getVersion() + 1);
+            database.getTable(table).putRow(key, newRow);
+
         } finally {
             lock.unlock();
         }
@@ -134,28 +175,41 @@ public class DatabaseService {
         for(var entry : tx.getChanges().entrySet()){
 
             String lockKey = entry.getKey();
-            Object value = entry.getValue();
+
+            if (lockKey == null) {
+                throw new RuntimeException("lockKey is null ");
+            }
+
+            if (!lockKey.contains(":")) {
+                throw new RuntimeException("Invalid lockKey format: " + lockKey);
+            }
 
             String[] parts = lockKey.split(":");
+
+            if (parts.length != 2) {
+                throw new RuntimeException("Invalid lockKey split: " + lockKey);
+            }
+
             String table = parts[0];
             String key = parts[1];
-
+            if (key == null || key.isEmpty()) {
+                throw new RuntimeException("Parsed key is null from " + lockKey);
+            }
             var lock = lockManager.getLock(lockKey).writeLock();
 
             lock.lock();
             try {
+
                 Row current = database.getTable(table).getRow(key);
 
                 int currentVersion = (current == null) ? 0 : current.getVersion();
-                Integer originalVersion = tx.getOriginalVersion(lockKey);
-
-                if (originalVersion == null) {
-                    throw new RuntimeException("Missing version info");
-                }
+                int originalVersion = tx.getOriginalVersion(lockKey);
 
                 if (currentVersion != originalVersion) {
                     throw new RuntimeException("Conflict detected! Retry transaction.");
                 }
+
+                Object value = entry.getValue();
 
                 if (value == null) {
                     database.getTable(table).deleteRow(key);
@@ -164,6 +218,7 @@ public class DatabaseService {
                     newRow.setVersion(currentVersion + 1);
                     database.getTable(table).putRow(key, newRow);
                 }
+
             } finally {
                 lock.unlock();
             }
@@ -180,6 +235,11 @@ public class DatabaseService {
             throw new RuntimeException("No active transaction");
         }
         transactionManager.remove(txId);
+    }
+
+    public void clear() {
+        database.clear();   // clear in-memory data
+        persistenceService.clear(); // clear file (VERY IMPORTANT)
     }
 
 

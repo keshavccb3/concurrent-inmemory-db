@@ -29,4 +29,16 @@ public class PersistenceService {
             throw new RuntimeException("Error Loading Database",e);
         }
     }
+    public void clear() {
+        try {
+            File file = new File("db.json");
+
+            if (file.exists()) {
+                file.delete();
+            }
+
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to clear persistence");
+        }
+    }
 }
