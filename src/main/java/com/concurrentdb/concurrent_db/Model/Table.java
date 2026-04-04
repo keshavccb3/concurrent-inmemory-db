@@ -5,15 +5,14 @@ import org.springframework.stereotype.Component;
 
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 
 @Data
 public class Table {
 
     private Map<String, Row> rows = new ConcurrentHashMap<>();
-
-    // column → value → set of keys
-    private Map<String, Map<Object, Set<String>>> indexes = new ConcurrentHashMap<>();
+    private Map<String, TreeMap<Object, Set<String>>> indexes = new ConcurrentHashMap<>();
 
     public Table() {}
 
@@ -67,25 +66,15 @@ public class Table {
 
             String column = entry.getKey();
             Object value = entry.getValue();
-            if (column == null || value == null) {
-                continue;
-            }
 
-            Map<Object, Set<String>> valueMap = indexes.get(column);
+            if (column == null || value == null) continue;
+            indexes.putIfAbsent(column, new TreeMap<>());
 
-            if (valueMap == null) {
-                valueMap = new ConcurrentHashMap<>();
-                indexes.put(column, valueMap);
-            }
+            TreeMap<Object, Set<String>> valueMap = indexes.get(column);
 
-            Set<String> keys = valueMap.get(value);
+            valueMap.putIfAbsent(value, ConcurrentHashMap.newKeySet());
 
-            if (keys == null) {
-                keys = ConcurrentHashMap.newKeySet();
-                valueMap.put(value, keys);
-            }
-
-            keys.add(key);
+            valueMap.get(value).add(key);
         }
     }
 
@@ -106,16 +95,19 @@ public class Table {
 
                 if (column == null || value == null) continue;
 
-                Map<Object, Set<String>> valueMap = indexes.get(column);
+                TreeMap<Object, Set<String>> valueMap = indexes.get(column);
                 if (valueMap == null) continue;
 
                 Set<String> keys = valueMap.get(value);
                 if (keys == null) continue;
 
                 keys.remove(key);
-
                 if (keys.isEmpty()) {
                     valueMap.remove(value);
+                }
+
+                if (valueMap.isEmpty()) {
+                    indexes.remove(column);
                 }
             }
 

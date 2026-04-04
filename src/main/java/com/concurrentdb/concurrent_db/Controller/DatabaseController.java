@@ -5,6 +5,7 @@ import com.concurrentdb.concurrent_db.Model.Table;
 import com.concurrentdb.concurrent_db.Service.DatabaseService;
 import com.concurrentdb.concurrent_db.Transactions.TransactionManager;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.util.MultiValueMap;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -116,6 +117,39 @@ public class DatabaseController {
     @GetMapping("/{table}/search")
     public List<Row> search(@PathVariable String table, @RequestParam String colunm, @RequestParam String value) {
         return databaseService.search(table, colunm, value);
+    }
+
+    @GetMapping("/{table}/search-multi")
+    public List<Row> searchMulti(@PathVariable String table, @RequestParam Map<String,String> filters) {
+        return databaseService.searchMulti(table, filters);
+    }
+
+    @GetMapping("/{table}/search-or")
+    public List<Row> searchOr(@PathVariable String table, @RequestParam MultiValueMap<String, String> filters) {
+        return databaseService.searchOr(table, filters);
+    }
+
+//    @GetMapping("/{table}/search-range")
+//    public List<Row> searchRange(@PathVariable String table,
+//                                 @RequestParam String column,
+//                                 @RequestParam String op,
+//                                 @RequestParam String value) {
+//
+//        return databaseService.searchRange(table, column, op, value);
+//    }
+
+    @GetMapping("/{table}/search-range")
+    public List<Row> searchRange(
+            @PathVariable String table,
+            @RequestParam String column,
+            @RequestParam String op,
+            @RequestParam String value,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "10") int size,
+            @RequestParam(required = false) String sort,
+            @RequestParam(defaultValue = "asc") String order
+    ) {
+        return databaseService.searchRange(table, column, op, value, page, size, sort, order);
     }
 
 

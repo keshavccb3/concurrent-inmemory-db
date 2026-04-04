@@ -7,8 +7,10 @@ import com.concurrentdb.concurrent_db.Storage.InMemoryDatabase;
 import com.concurrentdb.concurrent_db.Transactions.TransactionContext;
 import com.concurrentdb.concurrent_db.Transactions.TransactionManager;
 import com.concurrentdb.concurrent_db.lock.LockManager;
+import lombok.val;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.util.MultiValueMap;
 
 import java.util.*;
 import java.util.concurrent.locks.ReentrantLock;
@@ -266,6 +268,176 @@ public class DatabaseService {
 
     }
 
+    public List<Row> searchMulti(String table, Map<String,String> filters){
+        if(table == null || filters.isEmpty()){
+            throw new RuntimeException("Invalid parameters");
+        }
+        Table t =  database.getTable(table);
+        Set<String> resultKeys = null;
+        for(val entry : filters.entrySet()){
+            String colunm  = entry.getKey();
+            String value  = entry.getValue();
+            Map<Object,Set<String>> valueMap = t.getIndexes().get(colunm);
+            if(valueMap == null){
+                return new ArrayList<>();
+            }
+            Set<String> keys = valueMap.get(value);
+            if(keys == null){
+                return new ArrayList<>();
+            }
+            if(resultKeys == null){
+                resultKeys = new HashSet<>(keys);
+            }else{
+                resultKeys.retainAll(keys);
+            }
+        }
+        List<Row> result = new ArrayList<>();
+        if(resultKeys != null){
+            for(String key : resultKeys){
+                Row row = t.getRow(key);
+                if(row!=null){
+                    result.add(row);
+                }
+            }
+        }
+        return result;
+    }
 
+    public List<Row> searchOr(String table, MultiValueMap<String, String> filters) {
+
+        Table t = database.getTable(table);
+
+        Set<String> resultKeys = new HashSet<>();
+
+        for (var entry : filters.entrySet()) {
+
+            String column = entry.getKey();
+            List<String> values = entry.getValue();
+
+            Map<Object, Set<String>> valueMap = t.getIndexes().get(column);
+
+            if (valueMap == null) continue;
+
+            for (String value : values) {
+
+                Set<String> keys = valueMap.get(value);
+
+                if (keys != null) {
+                    resultKeys.addAll(keys);
+                }
+            }
+        }
+
+        List<Row> result = new ArrayList<>();
+
+        for (String key : resultKeys) {
+            Row row = t.getRow(key);
+            if (row != null) {
+                result.add(row);
+            }
+        }
+
+        return result;
+    }
+
+    public List<Row> searchRange(String table, String column, String op, String value) {
+
+        Table t = database.getTable(table);
+
+        TreeMap<Object, Set<String>> valueMap = t.getIndexes().get(column);
+
+        if (valueMap == null || valueMap.isEmpty()) {
+            return new ArrayList<>();
+        }
+
+        Object sampleKey = valueMap.firstKey();
+
+        Object parsedValue = parseValue(sampleKey, value);
+
+        NavigableMap<Object, Set<String>> subMap;
+
+        switch (op) {
+            case ">":
+                subMap = valueMap.tailMap(parsedValue, false);
+                break;
+            case ">=":
+                subMap = valueMap.tailMap(parsedValue, true);
+                break;
+            case "<":
+                subMap = valueMap.headMap(parsedValue, false);
+                break;
+            case "<=":
+                subMap = valueMap.headMap(parsedValue, true);
+                break;
+            default:
+                throw new RuntimeException("Invalid operator");
+        }
+
+        Set<String> resultKeys = new HashSet<>();
+
+        for (Set<String> keys : subMap.values()) {
+            resultKeys.addAll(keys);
+        }
+
+        List<Row> result = new ArrayList<>();
+
+        for (String key : resultKeys) {
+            Row row = t.getRow(key);
+            if (row != null) {
+                result.add(row);
+            }
+        }
+
+        return result;
+    }
+
+    private Object parseValue(Object sample, String value) {
+
+        if (sample instanceof Integer) {
+            return Integer.parseInt(value);
+        }
+
+        if (sample instanceof Long) {
+            return Long.parseLong(value);
+        }
+
+        if (sample instanceof Double) {
+            return Double.parseDouble(value);
+        }
+
+        return value;
+    }
+
+    public List<Row> searchRange(String table, String column, String op, String value,
+                                 int page, int size, String sort, String order) {
+
+        List<Row> result = searchRange(table, column, op, value);
+
+        if (sort != null) {
+            result.sort((r1, r2) -> {
+
+                Object v1 = r1.getData().get(sort);
+                Object v2 = r2.getData().get(sort);
+
+                if (v1 == null || v2 == null) return 0;
+
+                Comparable c1 = (Comparable) v1;
+                Comparable c2 = (Comparable) v2;
+
+                return order.equalsIgnoreCase("desc")
+                        ? c2.compareTo(c1)
+                        : c1.compareTo(c2);
+            });
+        }
+
+        int start = page * size;
+        int end = Math.min(start + size, result.size());
+
+        if (start >= result.size()) {
+            return new ArrayList<>();
+        }
+
+        return result.subList(start, end);
+    }
 
 }
