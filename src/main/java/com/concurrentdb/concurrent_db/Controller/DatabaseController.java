@@ -7,6 +7,7 @@ import com.concurrentdb.concurrent_db.Transactions.TransactionManager;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -111,5 +112,11 @@ public class DatabaseController {
     public void clearDatabase() {
         databaseService.clear();
     }
+
+    @GetMapping("/{table}/search")
+    public List<Row> search(@PathVariable String table, @RequestParam String colunm, @RequestParam String value) {
+        return databaseService.search(table, colunm, value);
+    }
+
 
 }

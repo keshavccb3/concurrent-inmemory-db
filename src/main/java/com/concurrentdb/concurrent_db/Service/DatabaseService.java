@@ -1,6 +1,7 @@
 package com.concurrentdb.concurrent_db.Service;
 
 import com.concurrentdb.concurrent_db.Model.Row;
+import com.concurrentdb.concurrent_db.Model.Table;
 import com.concurrentdb.concurrent_db.Persistence.PersistenceService;
 import com.concurrentdb.concurrent_db.Storage.InMemoryDatabase;
 import com.concurrentdb.concurrent_db.Transactions.TransactionContext;
@@ -9,8 +10,7 @@ import com.concurrentdb.concurrent_db.lock.LockManager;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
-import java.util.HashMap;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.locks.ReentrantLock;
 
 @Service
@@ -238,8 +238,32 @@ public class DatabaseService {
     }
 
     public void clear() {
-        database.clear();   // clear in-memory data
-        persistenceService.clear(); // clear file (VERY IMPORTANT)
+        database.clear();
+        persistenceService.clear();
+    }
+
+    public List<Row> search(String table, String colunm, String value){
+        if(table == null || colunm == null || value == null){
+            throw new RuntimeException("Invalid parameters");
+        }
+        Table t =  database.getTable(table);
+        Map<Object, Set<String>> valueMap = t.getIndexes().get(colunm);
+        if(valueMap == null){
+            return new ArrayList<>();
+        }
+        Set<String> keys = valueMap.get(value);
+        if(keys == null){
+            return new ArrayList<>();
+        }
+        List<Row> result = new ArrayList<>();
+        for(String key : keys){
+            Row row = t.getRow(key);
+            if(row!=null){
+                result.add(row);
+            }
+        }
+        return result;
+
     }
 
 
