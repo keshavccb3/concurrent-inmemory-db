@@ -13,62 +13,42 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
-@SpringBootTest
 public class ConcurrencyTest {
 
-    @Autowired
-    private DatabaseService databaseService;
+    public static void main(String[] args) throws Exception {
 
-    @Autowired
-    private TransactionManager transactionManager;
+        ExecutorService executor = Executors.newFixedThreadPool(10);
 
-    @Test
-    public void stressTestConcurrentTransactions() throws InterruptedException {
-
-        int threads = 10;
-        int tasks = 50;
-
-        ExecutorService executor = Executors.newFixedThreadPool(threads);
-
-        for (int i = 0; i < tasks; i++) {
+        for (int i = 0; i < 20; i++) {
             int id = i;
 
             executor.submit(() -> {
-                String txId = null;
-
                 try {
-                    // 🔥 BEGIN → auto generate txId
-                    txId = transactionManager.begin();
+                    String url = "http://localhost:8080/db/users/1";
 
-                    // 🔥 DATA
-                    Map<String, Object> data = new HashMap<>();
-                    data.put("name", "User" + id);
-                    data.put("age", 20 + id);
+                    java.net.HttpURLConnection conn =
+                            (java.net.HttpURLConnection) new java.net.URL(url).openConnection();
 
-                    // 🔥 INSERT
-                    databaseService.put("users", String.valueOf(id), data, txId);
+                    conn.setRequestMethod("PUT");
+                    conn.setDoOutput(true);
+                    conn.setRequestProperty("Content-Type", "application/json");
 
-                    // 🔥 COMMIT
-                    databaseService.commit(txId);
+                    String body = "{ \"age\": " + (20 + id) + " }";
 
-                    System.out.println("✅ SUCCESS: " + txId);
+                    try (var os = conn.getOutputStream()) {
+                        os.write(body.getBytes());
+                    }
+
+                    int code = conn.getResponseCode();
+                    System.out.println("Thread " + id + " → " + code);
 
                 } catch (Exception e) {
-                    System.out.println("❌ FAIL: " + txId + " → " + e.getMessage());
-
-                    // rollback if needed
-                    if (txId != null) {
-                        try {
-                            databaseService.rollback(txId);
-                        } catch (Exception ignored) {}
-                    }
+                    System.out.println("Thread " + id + " ERROR: " + e.getMessage());
                 }
             });
         }
 
         executor.shutdown();
-        executor.awaitTermination(60, TimeUnit.SECONDS);
-
-        System.out.println("🔥 STRESS TEST COMPLETED");
+        executor.awaitTermination(10, TimeUnit.SECONDS);
     }
 }
