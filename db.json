@@ -1,1 +1,0 @@
-{"persistenceService":{},"tables":{"users":{"rows":{"1":{"key":"1","data":{"name":"A","age":50},"version":3}},"indexes":{"name":{"A":["1"]},"age":{"50":["1"]}}}}}

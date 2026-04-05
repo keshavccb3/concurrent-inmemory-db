@@ -43,15 +43,13 @@ public class DatabaseService {
         TransactionContext tx = (txId != null) ? transactionManager.getContext(txId) : null;
 
         if (tx != null) {
-
-            // SERIALIZABLE → lock & hold
             if (tx.getIsolationLevel() == IsolationLevel.SERIALIZABLE) {
                 var lock = lockManager.getLock(lockKey).writeLock();
                 try {
                     if (!lock.tryLock(2, TimeUnit.SECONDS)) {
                         throw new RuntimeException("Deadlock detected (PUT)");
                     }
-                    tx.getLockedKeys().add(lockKey);
+                    tx.getLockedKeys().put(lockKey, "WRITE");
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     throw new RuntimeException("Interrupted");
@@ -66,7 +64,6 @@ public class DatabaseService {
             return;
         }
 
-        // non-tx
         var lock = lockManager.getLock(lockKey).writeLock();
         try {
             if (!lock.tryLock(2, TimeUnit.SECONDS)) {
@@ -95,19 +92,17 @@ public class DatabaseService {
 
         TransactionContext tx = (txId != null) ? transactionManager.getContext(txId) : null;
 
-        // read-your-writes
         if (tx != null && tx.getChanges().containsKey(lockKey)) {
             return (Row) tx.getChanges().get(lockKey);
         }
 
-        // SERIALIZABLE → lock & hold
         if (tx != null && tx.getIsolationLevel() == IsolationLevel.SERIALIZABLE) {
             var lock = lockManager.getLock(lockKey).readLock();
             try {
                 if (!lock.tryLock(2, TimeUnit.SECONDS)) {
                     throw new RuntimeException("Deadlock detected (GET)");
                 }
-                tx.getLockedKeys().add(lockKey);
+                tx.getLockedKeys().put(lockKey, "READ");
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 throw new RuntimeException("Interrupted");
@@ -138,7 +133,7 @@ public class DatabaseService {
                     return copy;
                 }
 
-                return row; // READ COMMITTED
+                return row;
             }
 
             return row;
@@ -167,7 +162,7 @@ public class DatabaseService {
                     if (!lock.tryLock(2, TimeUnit.SECONDS)) {
                         throw new RuntimeException("Deadlock detected (DELETE)");
                     }
-                    tx.getLockedKeys().add(lockKey);
+                    tx.getLockedKeys().put(lockKey, "WRITE");
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     throw new RuntimeException("Interrupted");
@@ -214,7 +209,7 @@ public class DatabaseService {
                     if (!lock.tryLock(2, TimeUnit.SECONDS)) {
                         throw new RuntimeException("Deadlock detected (UPDATE)");
                     }
-                    tx.getLockedKeys().add(lockKey);
+                    tx.getLockedKeys().put(lockKey, "WRITE");
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     throw new RuntimeException("Interrupted");
@@ -291,13 +286,21 @@ public class DatabaseService {
             }
         }
 
-        // 🔥 RELEASE ALL LOCKS (SERIALIZABLE)
-        for (String lockKey : tx.getLockedKeys()) {
+        for (var entry : tx.getLockedKeys().entrySet()) {
+
+            String lockKey = entry.getKey();
+            String type = entry.getValue();
+
+            var rwLock = lockManager.getLock(lockKey);
+
             try {
-                lockManager.getLock(lockKey).writeLock().unlock();
+                if ("WRITE".equals(type)) {
+                    rwLock.writeLock().unlock();
+                } else {
+                    rwLock.readLock().unlock();
+                }
             } catch (Exception ignored) {}
         }
-
         transactionManager.remove(txId);
         persistenceService.save(database);
     }
@@ -308,9 +311,19 @@ public class DatabaseService {
         TransactionContext tx = transactionManager.getContext(txId);
         if (tx == null) throw new RuntimeException("No active transaction");
 
-        for (String lockKey : tx.getLockedKeys()) {
+        for (var entry : tx.getLockedKeys().entrySet()) {
+
+            String lockKey = entry.getKey();
+            String type = entry.getValue();
+
+            var rwLock = lockManager.getLock(lockKey);
+
             try {
-                lockManager.getLock(lockKey).writeLock().unlock();
+                if ("WRITE".equals(type)) {
+                    rwLock.writeLock().unlock();
+                } else {
+                    rwLock.readLock().unlock();
+                }
             } catch (Exception ignored) {}
         }
 
@@ -335,7 +348,7 @@ public class DatabaseService {
         if (data != null && data.isEmpty())
             throw new RuntimeException("Request body cannot be empty");
     }
-
+    // ================= QUERIES =================
     public List<Row> search(String table, String colunm, String value){
         if(table == null || colunm == null || value == null){
             throw new RuntimeException("Invalid parameters");

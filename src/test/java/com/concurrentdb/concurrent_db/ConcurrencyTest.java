@@ -7,48 +7,88 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
+@SpringBootTest
 public class ConcurrencyTest {
 
-    public static void main(String[] args) throws Exception {
+    private static final String BASE_URL = "http://localhost:8080/db/users/";
 
-        ExecutorService executor = Executors.newFixedThreadPool(10);
+    @Test
+    public void stressTest() throws Exception {
 
-        for (int i = 0; i < 20; i++) {
-            int id = i;
+        int threads = 20;
+        ExecutorService executor = Executors.newFixedThreadPool(threads);
+
+        for (int i = 0; i < threads; i++) {
+            int threadId = i;
 
             executor.submit(() -> {
                 try {
-                    String url = "http://localhost:8080/db/users/1";
 
-                    java.net.HttpURLConnection conn =
-                            (java.net.HttpURLConnection) new java.net.URL(url).openConnection();
+                    // 🔥 Each thread works on SAME key → high contention
+                    String key = "1";
 
-                    conn.setRequestMethod("PUT");
-                    conn.setDoOutput(true);
-                    conn.setRequestProperty("Content-Type", "application/json");
+                    // PUT
+                    sendRequest("POST", BASE_URL + key,
+                            "{\"name\":\"User" + threadId + "\",\"age\":" + (20 + threadId) + "}");
 
-                    String body = "{ \"age\": " + (20 + id) + " }";
+                    // UPDATE
+                    sendRequest("PUT", BASE_URL + key,
+                            "{\"age\":" + (30 + threadId) + "}");
 
-                    try (var os = conn.getOutputStream()) {
-                        os.write(body.getBytes());
-                    }
+                    // GET
+                    sendRequest("GET", BASE_URL + key, null);
 
-                    int code = conn.getResponseCode();
-                    System.out.println("Thread " + id + " → " + code);
+                    // DELETE (optional — comment if too aggressive)
+                    // sendRequest("DELETE", BASE_URL + key, null);
 
                 } catch (Exception e) {
-                    System.out.println("Thread " + id + " ERROR: " + e.getMessage());
+                    System.out.println("Thread " + threadId + " ERROR: " + e.getMessage());
                 }
             });
         }
 
         executor.shutdown();
-        executor.awaitTermination(10, TimeUnit.SECONDS);
+
+        while (!executor.isTerminated()) {
+            Thread.sleep(100);
+        }
+
+        System.out.println("🔥 Stress test completed");
+    }
+
+    private void sendRequest(String method, String urlStr, String body) throws Exception {
+
+        URL url = new URL(urlStr);
+        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+
+        conn.setRequestMethod(method);
+        conn.setConnectTimeout(2000);
+        conn.setReadTimeout(2000);
+
+        if (body != null) {
+            conn.setDoOutput(true);
+            conn.setRequestProperty("Content-Type", "application/json");
+
+            try (OutputStream os = conn.getOutputStream()) {
+                os.write(body.getBytes());
+                os.flush();
+            }
+        }
+
+        int responseCode = conn.getResponseCode();
+
+        // Accept expected failures (due to concurrency)
+        if (responseCode >= 500) {
+            throw new RuntimeException("Server error: " + responseCode);
+        }
     }
 }

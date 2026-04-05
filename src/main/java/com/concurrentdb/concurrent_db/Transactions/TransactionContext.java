@@ -12,7 +12,7 @@ public class TransactionContext {
     private final Map<String,Object> changes = new HashMap<>();
     private final Map<String,Integer> originalVersions = new HashMap<>();
     private Map<String, Row> readSnapshot = new HashMap<>();
-    private Set<String> lockedKeys = new HashSet<>();
+    private Map<String, String> lockedKeys = new HashMap<>();
     private IsolationLevel isolationLevel;
     public TransactionContext(IsolationLevel level) {
         this.isolationLevel = level;
