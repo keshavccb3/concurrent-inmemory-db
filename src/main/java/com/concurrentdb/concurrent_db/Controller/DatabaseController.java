@@ -3,6 +3,7 @@ package com.concurrentdb.concurrent_db.Controller;
 import com.concurrentdb.concurrent_db.Model.Row;
 import com.concurrentdb.concurrent_db.Model.Table;
 import com.concurrentdb.concurrent_db.Service.DatabaseService;
+import com.concurrentdb.concurrent_db.Transactions.IsolationLevel;
 import com.concurrentdb.concurrent_db.Transactions.TransactionManager;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.util.MultiValueMap;
@@ -90,8 +91,8 @@ public class DatabaseController {
     }
 
     @PostMapping("/tx/begin")
-    public String beginTransaction(){
-        return transactionManager.begin();
+    public String beginTransaction(@RequestParam IsolationLevel level){
+        return transactionManager.begin(level);
     }
     @PostMapping("/tx/commit")
     public void commitTransaction(@RequestParam String txId) {

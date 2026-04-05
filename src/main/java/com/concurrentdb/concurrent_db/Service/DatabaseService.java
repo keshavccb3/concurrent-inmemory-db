@@ -4,6 +4,7 @@ import com.concurrentdb.concurrent_db.Model.Row;
 import com.concurrentdb.concurrent_db.Model.Table;
 import com.concurrentdb.concurrent_db.Persistence.PersistenceService;
 import com.concurrentdb.concurrent_db.Storage.InMemoryDatabase;
+import com.concurrentdb.concurrent_db.Transactions.IsolationLevel;
 import com.concurrentdb.concurrent_db.Transactions.TransactionContext;
 import com.concurrentdb.concurrent_db.Transactions.TransactionManager;
 import com.concurrentdb.concurrent_db.lock.LockManager;
@@ -42,33 +43,47 @@ public class DatabaseService {
         TransactionContext tx = (txId != null) ? transactionManager.getContext(txId) : null;
 
         if (tx != null) {
+
+            // SERIALIZABLE → lock & hold
+            if (tx.getIsolationLevel() == IsolationLevel.SERIALIZABLE) {
+                var lock = lockManager.getLock(lockKey).writeLock();
+                try {
+                    if (!lock.tryLock(2, TimeUnit.SECONDS)) {
+                        throw new RuntimeException("Deadlock detected (PUT)");
+                    }
+                    tx.getLockedKeys().add(lockKey);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new RuntimeException("Interrupted");
+                }
+            }
+
             Row existing = database.getTable(table).getRow(key);
             int version = (existing == null) ? 0 : existing.getVersion();
+
             tx.setOriginalVersion(lockKey, version);
             tx.put(lockKey, new Row(key, data));
             return;
         }
 
+        // non-tx
         var lock = lockManager.getLock(lockKey).writeLock();
-        boolean acquired = false;
-
         try {
-            acquired = lock.tryLock(2, TimeUnit.SECONDS);
-
-            if (!acquired) throw new RuntimeException("Deadlock detected (PUT)");
+            if (!lock.tryLock(2, TimeUnit.SECONDS)) {
+                throw new RuntimeException("Deadlock detected (PUT)");
+            }
 
             if (database.getTable(table).getRow(key) != null) {
                 throw new RuntimeException("Key already exists");
             }
 
-            Row row = new Row(key, data);
-            database.getTable(table).putRow(key, row);
+            database.getTable(table).putRow(key, new Row(key, data));
 
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new RuntimeException("Thread interrupted");
+            throw new RuntimeException("Interrupted");
         } finally {
-            if (acquired) lock.unlock();
+            lock.unlock();
         }
     }
 
@@ -80,28 +95,59 @@ public class DatabaseService {
 
         TransactionContext tx = (txId != null) ? transactionManager.getContext(txId) : null;
 
+        // read-your-writes
         if (tx != null && tx.getChanges().containsKey(lockKey)) {
             return (Row) tx.getChanges().get(lockKey);
         }
 
+        // SERIALIZABLE → lock & hold
+        if (tx != null && tx.getIsolationLevel() == IsolationLevel.SERIALIZABLE) {
+            var lock = lockManager.getLock(lockKey).readLock();
+            try {
+                if (!lock.tryLock(2, TimeUnit.SECONDS)) {
+                    throw new RuntimeException("Deadlock detected (GET)");
+                }
+                tx.getLockedKeys().add(lockKey);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException("Interrupted");
+            }
+        }
+
         var lock = lockManager.getLock(lockKey).readLock();
-        boolean acquired = false;
-
         try {
-            acquired = lock.tryLock(2, TimeUnit.SECONDS);
-
-            if (!acquired) throw new RuntimeException("Deadlock detected (GET)");
+            if (!lock.tryLock(2, TimeUnit.SECONDS)) {
+                throw new RuntimeException("Deadlock detected (GET)");
+            }
 
             Row row = database.getTable(table).getRow(key);
             if (row == null) throw new RuntimeException("Row not found");
+
+            if (tx != null) {
+
+                if (tx.getIsolationLevel() == IsolationLevel.REPEATABLE_READ) {
+
+                    if (tx.getReadSnapshot().containsKey(lockKey)) {
+                        return tx.getReadSnapshot().get(lockKey);
+                    }
+
+                    Row copy = new Row(row.getKey(), new HashMap<>(row.getData()));
+                    copy.setVersion(row.getVersion());
+
+                    tx.getReadSnapshot().put(lockKey, copy);
+                    return copy;
+                }
+
+                return row; // READ COMMITTED
+            }
 
             return row;
 
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new RuntimeException("Thread interrupted");
+            throw new RuntimeException("Interrupted");
         } finally {
-            if (acquired) lock.unlock();
+            lock.unlock();
         }
     }
 
@@ -114,6 +160,20 @@ public class DatabaseService {
         TransactionContext tx = (txId != null) ? transactionManager.getContext(txId) : null;
 
         if (tx != null) {
+
+            if (tx.getIsolationLevel() == IsolationLevel.SERIALIZABLE) {
+                var lock = lockManager.getLock(lockKey).writeLock();
+                try {
+                    if (!lock.tryLock(2, TimeUnit.SECONDS)) {
+                        throw new RuntimeException("Deadlock detected (DELETE)");
+                    }
+                    tx.getLockedKeys().add(lockKey);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new RuntimeException("Interrupted");
+                }
+            }
+
             Row existing = database.getTable(table).getRow(key);
             if (existing == null) throw new RuntimeException("Row not found");
 
@@ -123,23 +183,18 @@ public class DatabaseService {
         }
 
         var lock = lockManager.getLock(lockKey).writeLock();
-        boolean acquired = false;
-
         try {
-            acquired = lock.tryLock(2, TimeUnit.SECONDS);
-
-            if (!acquired) throw new RuntimeException("Deadlock detected (DELETE)");
-
-            Row row = database.getTable(table).getRow(key);
-            if (row == null) throw new RuntimeException("Row not found");
+            if (!lock.tryLock(2, TimeUnit.SECONDS)) {
+                throw new RuntimeException("Deadlock detected");
+            }
 
             database.getTable(table).deleteRow(key);
 
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new RuntimeException("Thread interrupted");
+            throw new RuntimeException("Interrupted");
         } finally {
-            if (acquired) lock.unlock();
+            lock.unlock();
         }
     }
 
@@ -149,43 +204,58 @@ public class DatabaseService {
         validate(table, key, data);
         String lockKey = table + ":" + key;
 
-        var lock = lockManager.getLock(lockKey).writeLock();
-        boolean acquired = false;
+        TransactionContext tx = (txId != null) ? transactionManager.getContext(txId) : null;
 
-        try {
-            acquired = lock.tryLock(2, TimeUnit.SECONDS);
+        if (tx != null) {
 
-            if (!acquired) throw new RuntimeException("Deadlock detected (UPDATE)");
-
-            Row existing = database.getTable(table).getRow(key);
-            if (existing == null) throw new RuntimeException("Row does not exist");
-
-            Map<String, Object> updatedData = new HashMap<>(existing.getData());
-
-            for (var entry : data.entrySet()) {
-                if (entry.getValue() != null) {
-                    updatedData.put(entry.getKey(), entry.getValue());
+            if (tx.getIsolationLevel() == IsolationLevel.SERIALIZABLE) {
+                var lock = lockManager.getLock(lockKey).writeLock();
+                try {
+                    if (!lock.tryLock(2, TimeUnit.SECONDS)) {
+                        throw new RuntimeException("Deadlock detected (UPDATE)");
+                    }
+                    tx.getLockedKeys().add(lockKey);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new RuntimeException("Interrupted");
                 }
             }
 
-            Row newRow = new Row(key, updatedData);
+            Row existing = database.getTable(table).getRow(key);
+            if (existing == null) throw new RuntimeException("Row not found");
 
-            TransactionContext tx = (txId != null) ? transactionManager.getContext(txId) : null;
+            Map<String, Object> updated = new HashMap<>(existing.getData());
+            updated.putAll(data);
 
-            if (tx != null) {
-                tx.put(lockKey, newRow);
-                tx.setOriginalVersion(lockKey, existing.getVersion());
-                return;
+            Row newRow = new Row(key, updated);
+
+            tx.setOriginalVersion(lockKey, existing.getVersion());
+            tx.put(lockKey, newRow);
+            return;
+        }
+
+        var lock = lockManager.getLock(lockKey).writeLock();
+        try {
+            if (!lock.tryLock(2, TimeUnit.SECONDS)) {
+                throw new RuntimeException("Deadlock detected");
             }
 
+            Row existing = database.getTable(table).getRow(key);
+            if (existing == null) throw new RuntimeException("Row not found");
+
+            Map<String, Object> updated = new HashMap<>(existing.getData());
+            updated.putAll(data);
+
+            Row newRow = new Row(key, updated);
             newRow.setVersion(existing.getVersion() + 1);
+
             database.getTable(table).putRow(key, newRow);
 
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new RuntimeException("Thread interrupted");
+            throw new RuntimeException("Interrupted");
         } finally {
-            if (acquired) lock.unlock();
+            lock.unlock();
         }
     }
 
@@ -202,38 +272,30 @@ public class DatabaseService {
             String table = parts[0];
             String key = parts[1];
 
-            var lock = lockManager.getLock(lockKey).writeLock();
-            boolean acquired = false;
+            Row current = database.getTable(table).getRow(key);
+            int currentVersion = (current == null) ? 0 : current.getVersion();
+            int originalVersion = tx.getOriginalVersion(lockKey);
 
-            try {
-                acquired = lock.tryLock(2, TimeUnit.SECONDS);
-
-                if (!acquired) throw new RuntimeException("Deadlock detected (COMMIT)");
-
-                Row current = database.getTable(table).getRow(key);
-                int currentVersion = (current == null) ? 0 : current.getVersion();
-                int originalVersion = tx.getOriginalVersion(lockKey);
-
-                if (currentVersion != originalVersion) {
-                    throw new RuntimeException("Conflict detected! Retry transaction.");
-                }
-
-                Object value = entry.getValue();
-
-                if (value == null) {
-                    database.getTable(table).deleteRow(key);
-                } else {
-                    Row newRow = (Row) value;
-                    newRow.setVersion(currentVersion + 1);
-                    database.getTable(table).putRow(key, newRow);
-                }
-
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new RuntimeException("Thread interrupted");
-            } finally {
-                if (acquired) lock.unlock();
+            if (currentVersion != originalVersion) {
+                throw new RuntimeException("Conflict detected!");
             }
+
+            Object value = entry.getValue();
+
+            if (value == null) {
+                database.getTable(table).deleteRow(key);
+            } else {
+                Row newRow = (Row) value;
+                newRow.setVersion(currentVersion + 1);
+                database.getTable(table).putRow(key, newRow);
+            }
+        }
+
+        // 🔥 RELEASE ALL LOCKS (SERIALIZABLE)
+        for (String lockKey : tx.getLockedKeys()) {
+            try {
+                lockManager.getLock(lockKey).writeLock().unlock();
+            } catch (Exception ignored) {}
         }
 
         transactionManager.remove(txId);
@@ -242,9 +304,16 @@ public class DatabaseService {
 
     // ================= ROLLBACK =================
     public void rollback(String txId) {
-        if (transactionManager.getContext(txId) == null) {
-            throw new RuntimeException("No active transaction");
+
+        TransactionContext tx = transactionManager.getContext(txId);
+        if (tx == null) throw new RuntimeException("No active transaction");
+
+        for (String lockKey : tx.getLockedKeys()) {
+            try {
+                lockManager.getLock(lockKey).writeLock().unlock();
+            } catch (Exception ignored) {}
         }
+
         transactionManager.remove(txId);
     }
 

@@ -11,9 +11,9 @@ public class TransactionManager {
 
     private final Map<String, TransactionContext> transactions = new ConcurrentHashMap<>();
 
-    public String begin() {
+    public String begin(IsolationLevel level) {
         String txId = UUID.randomUUID().toString();
-        transactions.put(txId, new TransactionContext());
+        transactions.put(txId, new TransactionContext(level));
         return txId;
     }
 
